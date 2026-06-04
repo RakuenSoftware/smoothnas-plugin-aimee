@@ -1,13 +1,16 @@
-# aimee-kb — the knowledge-base service (DB2 + pgvector).
+# aimee-kb — self-contained knowledge base (DB2 + pgvector).
 #
-# Serves the /v1 HTTP API and owns the shared, vector-backed memory store. It
-# does NOT bundle its datastores: it requires a reachable Postgres (pgvector)
-# database AND an embedder service. SmoothNAS plugins are single-container, so
-# those two dependencies must run elsewhere (your own infra, another host, or a
-# separate plugin) and be reachable from this container — set AIMEE_DB2_URL and
-# AIMEE_EMBEDDER_URL below accordingly.
+# Serves the /v1 HTTP API and owns the shared, vector-backed memory store.
+# As a compose-style SmoothNAS plugin (smoothnas.io/v1 services), this brings
+# up its OWN pgvector Postgres and embedder alongside the kb — no external
+# infrastructure to stand up or configure. The kb reaches its siblings over the
+# plugin bridge via service-discovery tokens ({{service.<name>.host}}).
 #
-# Image: ghcr.io/rakuensoftware/aimee-kb  (Dockerfile upstream)
+# Images:
+#   ghcr.io/rakuensoftware/aimee-kb         (kb)
+#   pgvector/pgvector:pg16                  (Postgres, public)
+#   ghcr.io/rakuensoftware/aimee-embedder   (embedder — published from
+#                                            Dockerfile.embedder; see release CI)
 apiVersion: smoothnas.io/v1
 kind: Plugin
 metadata:
@@ -15,59 +18,99 @@ metadata:
   version: 0.1.0
   description: >-
     aimee knowledge base — shared, vector-backed memory over the /v1 HTTP API.
-    Requires an external Postgres (pgvector) database and embedder service
-    (configure AIMEE_DB2_URL and AIMEE_EMBEDDER_URL).
+    Self-contained: bundles its pgvector Postgres and embedder, so there is no
+    external database or embedder to configure.
   vendor: RakuenSoftware
   homepage: https://github.com/RakuenSoftware/aimee
-artifact:
-  type: oci-image
-  image: ghcr.io/rakuensoftware/aimee-kb:latest
-container:
-  # Image default CMD is ["--http-port=8741"]; AIMEE_KB_HTTP_BIND=1 (baked) binds
-  # the listener on 0.0.0.0. No override needed.
-  restartPolicy: unless-stopped
-volumes:
-  # kb state and baked config under AIMEE_HOME. (Postgres data is external.)
-  - name: home
-    mode: flat
-    bind: /var/lib/aimee
-ports:
-  - name: api
-    port: 8741
-    protocol: tcp
-    expose: false
-    hostExpose: true
-config:
-  # REQUIRED. Connection URL for the pgvector-enabled Postgres that backs DB2.
-  # The image default points at the compose hostname `postgres`, which does NOT
-  # resolve outside that compose network — override with a reachable address.
-  - key: AIMEE_DB2_URL
-    type: string
-    label: Postgres (pgvector) URL
-    default: postgresql://aimee:aimee@postgres:5432/aimee_shared
-    description: >-
-      REQUIRED. libpq connection URL for the pgvector Postgres backing DB2 (e.g.
-      postgresql://aimee:PASS@10.0.0.6:5432/aimee_shared). Must be reachable from
-      this container.
-  # REQUIRED. Embedder service base URL (backs real semantic embeddings).
-  - key: AIMEE_EMBEDDER_URL
-    type: string
-    label: Embedder URL
-    default: http://embedder:8080
-    description: >-
-      REQUIRED. Base URL of the embedder service (e.g. http://10.0.0.6:8080).
-      Must be reachable from this container.
-  # Optional OpenAI-compatible LLM endpoint enabling the synthesis / curator
-  # passes. Blank leaves them disabled (they fail closed without an endpoint).
-  - key: LLM_ENDPOINT
-    type: string
-    label: LLM endpoint (optional)
-    default: ""
-    description: >-
-      Optional. OpenAI-compatible endpoint (e.g. http://10.0.0.7:8080/v1) to
-      enable the candidate-synthesis and curator passes. Blank = disabled.
-  - key: LLM_MODEL
-    type: string
-    label: LLM model (optional)
-    default: ""
-    description: Optional. Model name to request from the LLM endpoint.
+services:
+  # Bundled pgvector Postgres backing DB2. Brought up first; the kb waits for
+  # it to pass its healthcheck before starting.
+  - name: postgres
+    artifact:
+      type: oci-image
+      image: pgvector/pgvector:pg16
+    container:
+      restartPolicy: unless-stopped
+    env:
+      POSTGRES_DB: aimee_shared
+      POSTGRES_USER: aimee
+      POSTGRES_PASSWORD: aimee
+    volumes:
+      - name: pgdata
+        mode: flat
+        bind: /var/lib/postgresql/data
+    health:
+      test: ["CMD-SHELL", "pg_isready -U aimee -d aimee_shared"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Bundled embedder: holds all-MiniLM-L6-v2 resident and serves /embed over
+  # HTTP so the kb embeds without reloading the model per call.
+  - name: embedder
+    artifact:
+      type: oci-image
+      image: ghcr.io/rakuensoftware/aimee-embedder:latest
+    container:
+      restartPolicy: unless-stopped
+    volumes:
+      - name: models
+        mode: flat
+        bind: /opt/models
+    ports:
+      - name: http
+        port: 8080
+        protocol: tcp
+        expose: false
+    health:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      startPeriod: 30s
+
+  # The kb itself. Reaches postgres + embedder over the plugin bridge; both
+  # URLs are rendered from sibling service discovery, so nothing to configure.
+  - name: kb
+    artifact:
+      type: oci-image
+      image: ghcr.io/rakuensoftware/aimee-kb:latest
+    container:
+      # Image default CMD is ["--http-port=8741"]; AIMEE_KB_HTTP_BIND=1 binds
+      # the listener on 0.0.0.0.
+      restartPolicy: unless-stopped
+    dependsOn:
+      postgres:
+        condition: service_healthy
+      embedder:
+        condition: service_healthy
+    env:
+      AIMEE_DB2_URL: postgresql://aimee:aimee@{{service.postgres.host}}:5432/aimee_shared
+      AIMEE_EMBEDDER_URL: http://{{service.embedder.host}}:8080
+      AIMEE_KB_HTTP_BIND: "1"
+    volumes:
+      # kb state and baked config under AIMEE_HOME.
+      - name: home
+        mode: flat
+        bind: /var/lib/aimee
+    ports:
+      - name: api
+        port: 8741
+        protocol: tcp
+        expose: false
+        hostExpose: true
+    config:
+      # Optional OpenAI-compatible LLM endpoint enabling the synthesis /
+      # curator passes. Blank leaves them disabled (they fail closed).
+      - key: LLM_ENDPOINT
+        type: string
+        label: LLM endpoint (optional)
+        default: ""
+        description: >-
+          Optional. OpenAI-compatible endpoint (e.g. http://10.0.0.7:8080/v1) to
+          enable the candidate-synthesis and curator passes. Blank = disabled.
+      - key: LLM_MODEL
+        type: string
+        label: LLM model (optional)
+        default: ""
+        description: Optional. Model name to request from the LLM endpoint.
