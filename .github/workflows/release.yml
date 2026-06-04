@@ -1,0 +1,48 @@
+# Publish the SmoothNAS plugin manifests as GitHub release assets.
+#
+# The SmoothNAS plugin catalog reads a repo's *latest release* and ingests every
+# asset named smoothnas-plugin*.yaml. This workflow attaches the three manifests
+# under manifests/ to a release whenever a v* tag is pushed (or on manual
+# dispatch). Tag with the manifests' metadata.version, e.g.:
+#
+#   git tag v0.1.0 && git push origin v0.1.0
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Cheap sanity check: every asset must be a smoothnas.io/v1 Plugin and
+      # YAML-parseable. Field-level validation happens in SmoothNAS at install.
+      - name: Sanity-check manifests
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(manifests/smoothnas-plugin-*.yaml)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "no manifests found under manifests/" >&2
+            exit 1
+          fi
+          for f in "${files[@]}"; do
+            echo "checking $f"
+            python3 -c "import sys,yaml; d=yaml.safe_load(open(sys.argv[1])); \
+              assert d.get('apiVersion')=='smoothnas.io/v1', 'bad apiVersion'; \
+              assert d.get('kind')=='Plugin', 'bad kind'; \
+              assert d['metadata']['name'] and d['metadata']['version'], 'missing name/version'" "$f"
+          done
+
+      - name: Publish release with manifest assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: manifests/smoothnas-plugin-*.yaml
+          generate_release_notes: true

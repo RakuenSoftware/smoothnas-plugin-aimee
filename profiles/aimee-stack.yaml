@@ -1,0 +1,25 @@
+# Optional operator profile: raise the container stack rlimit to 64 MB.
+#
+# aimee-server's worker threads need a 64 MB stack; the small default stack
+# rlimit can overflow during startup and segfault the process (the upstream
+# Dockerfiles document `--ulimit stack=67108864`). The SmoothNAS plugin manifest
+# has no ulimits field, so this is delivered as an operator profile instead.
+#
+# Install (on the SmoothNAS host):
+#   sudo cp aimee-stack.yaml /etc/smoothnas/plugin-profiles.d/aimee-stack.yaml
+# then add it to the aimee-server / aimee-combined manifest before installing:
+#   profiles:
+#     - aimee-stack
+#
+# Referencing a profile that is not present on the host fails the install with
+# `profile "aimee-stack" not in catalog`, so drop this file in FIRST.
+apiVersion: smoothnas.io/v1
+kind: PluginProfile
+metadata:
+  name: aimee-stack
+  description: >-
+    Raise the container stack rlimit to 64 MB for aimee-server / aimee-combined
+    (their worker threads overflow a small default stack on startup).
+lxc:
+  rawConfig:
+    - "lxc.prlimit.stack = 67108864:67108864"

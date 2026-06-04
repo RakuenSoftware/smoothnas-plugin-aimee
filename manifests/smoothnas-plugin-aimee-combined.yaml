@@ -1,0 +1,77 @@
+# aimee-combined — aimee-server + aimee-kb co-located in one container.
+#
+# Runs BOTH aimee binaries in a single container: the kb listens on loopback
+# :8741 inside the container and the server (published on :8740) reaches it over
+# loopback HTTP. This is the one-container equivalent of the split server+kb
+# stack. Postgres (DB2 + pgvector) and the embedder remain EXTERNAL — this image
+# bundles the two aimee binaries, not a database — so AIMEE_DB2_URL and
+# AIMEE_EMBEDDER_URL must point at reachable services.
+#
+# NOTE: the server's worker threads need a 64 MB stack. If the container
+# segfaults on startup, raise its stack rlimit — see the repo README
+# ("Stack rlimit") and profiles/aimee-stack.yaml.
+#
+# Image: ghcr.io/rakuensoftware/aimee-server-kb  (Dockerfile.combined upstream)
+apiVersion: smoothnas.io/v1
+kind: Plugin
+metadata:
+  name: aimee-combined
+  version: 0.1.0
+  description: >-
+    aimee server + knowledge base in one container — the full /v1 surface with
+    shared/vector memory. Requires an external Postgres (pgvector) database and
+    embedder service (configure AIMEE_DB2_URL and AIMEE_EMBEDDER_URL).
+  vendor: RakuenSoftware
+  homepage: https://github.com/RakuenSoftware/aimee
+artifact:
+  type: oci-image
+  image: ghcr.io/rakuensoftware/aimee-server-kb:latest
+container:
+  # The image entrypoint starts the kb, waits for its health, then execs the
+  # server (server↔kb wiring is internal: AIMEE_KB_API_URL=http://127.0.0.1:8741
+  # is baked in). No command override needed.
+  restartPolicy: unless-stopped
+volumes:
+  - name: home
+    mode: flat
+    bind: /var/lib/aimee
+  - name: workspaces
+    mode: flat
+    bind: /var/lib/aimee-workspaces
+ports:
+  # The server /v1 listener is the container's public contract.
+  - name: api
+    port: 8740
+    protocol: tcp
+    expose: false
+    hostExpose: true
+config:
+  # REQUIRED. pgvector Postgres backing DB2 — override the compose-hostname
+  # default with a reachable address (see aimee-kb manifest for detail).
+  - key: AIMEE_DB2_URL
+    type: string
+    label: Postgres (pgvector) URL
+    default: postgresql://aimee:aimee@postgres:5432/aimee_shared
+    description: >-
+      REQUIRED. libpq connection URL for the pgvector Postgres backing DB2 (e.g.
+      postgresql://aimee:PASS@10.0.0.6:5432/aimee_shared). Must be reachable from
+      this container.
+  - key: AIMEE_EMBEDDER_URL
+    type: string
+    label: Embedder URL
+    default: http://embedder:8080
+    description: >-
+      REQUIRED. Base URL of the embedder service (e.g. http://10.0.0.6:8080).
+      Must be reachable from this container.
+  - key: LLM_ENDPOINT
+    type: string
+    label: LLM endpoint (optional)
+    default: ""
+    description: >-
+      Optional. OpenAI-compatible endpoint to enable the kb synthesis / curator
+      passes. Blank = disabled.
+  - key: LLM_MODEL
+    type: string
+    label: LLM model (optional)
+    default: ""
+    description: Optional. Model name to request from the LLM endpoint.
