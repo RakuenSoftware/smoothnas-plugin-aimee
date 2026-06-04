@@ -1,38 +1,90 @@
-# Publish the SmoothNAS plugin manifests as GitHub release assets.
+# Auto-release on every push to main.
 #
-# The SmoothNAS plugin catalog reads a repo's *latest release* and ingests every
-# asset named smoothnas-plugin*.yaml. This workflow attaches the three manifests
-# under manifests/ to a release whenever a v* tag is pushed (or on manual
-# dispatch). Tag with the manifests' metadata.version, e.g.:
+# Mirrors the aimee repo's auto-release flow. On each push to `main` this:
+#   1. computes the next semver PATCH from the highest existing v* tag
+#      (workflow_dispatch may pass an explicit version to bump minor/major),
+#   2. stamps that version into each manifest's metadata.version,
+#   3. cuts a GitHub release tagged v<version> with the three
+#      smoothnas-plugin-aimee-*.yaml manifests as assets.
 #
-#   git tag v0.1.0 && git push origin v0.1.0
+# The SmoothNAS catalog reads a repo's *latest release* and ingests every asset
+# named smoothnas-plugin*.yaml, so cutting the release is what makes a new
+# version available to the appliance. The committed manifests carry a base
+# metadata.version; the RELEASED assets are stamped with the real version here.
 name: release
 
 on:
   push:
-    tags: ["v*"]
+    branches: [main]
+    # Doc-only changes shouldn't mint a new version.
+    paths-ignore:
+      - '**.md'
+      - 'LICENSE'
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Explicit version without leading v (e.g. 0.2.0). Blank = auto patch bump.'
+        required: false
+        type: string
 
 permissions:
   contents: write
+
+# Serialize so two quick pushes can't race to compute the same next version.
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
   release:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
 
-      # Cheap sanity check: every asset must be a smoothnas.io/v1 Plugin and
-      # YAML-parseable. Field-level validation happens in SmoothNAS at install.
+      - name: Compute version
+        id: ver
+        run: |
+          set -euo pipefail
+          input="${{ inputs.version }}"
+          if [ -n "$input" ]; then
+            next="$input"
+          else
+            latest=$(git tag --list 'v*' --sort=-v:refname | head -n1)
+            if [ -z "$latest" ]; then
+              next="0.1.0"
+            else
+              v="${latest#v}"
+              IFS='.' read -r major minor patch <<< "$v"
+              major=${major:-0}; minor=${minor:-0}; patch=${patch:-0}
+              next="${major}.${minor}.$((patch + 1))"
+            fi
+          fi
+          if ! printf '%s' "$next" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::computed version '$next' is not MAJOR.MINOR.PATCH"; exit 1
+          fi
+          if git rev-parse -q --verify "refs/tags/v${next}" >/dev/null; then
+            echo "::error::tag v${next} already exists; aborting to avoid clobbering a release"; exit 1
+          fi
+          echo "version=$next" >> "$GITHUB_OUTPUT"
+          echo "Next version: v${next} (from ${latest:-<none>})"
+
+      - name: Stamp manifest versions
+        run: |
+          set -euo pipefail
+          for f in manifests/smoothnas-plugin-*.yaml; do
+            sed -i -E "s/^  version: .*/  version: ${{ steps.ver.outputs.version }}/" "$f"
+            printf '%s -> ' "$f"; grep -E '^  version:' "$f"
+          done
+
       - name: Sanity-check manifests
         run: |
           set -euo pipefail
           shopt -s nullglob
           files=(manifests/smoothnas-plugin-*.yaml)
-          if [ ${#files[@]} -eq 0 ]; then
-            echo "no manifests found under manifests/" >&2
-            exit 1
-          fi
+          [ ${#files[@]} -gt 0 ] || { echo "no manifests found under manifests/" >&2; exit 1; }
           for f in "${files[@]}"; do
             echo "checking $f"
             python3 -c "import sys,yaml; d=yaml.safe_load(open(sys.argv[1])); \
@@ -41,8 +93,10 @@ jobs:
               assert d['metadata']['name'] and d['metadata']['version'], 'missing name/version'" "$f"
           done
 
-      - name: Publish release with manifest assets
+      - name: Publish release with stamped manifest assets
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ steps.ver.outputs.version }}
+          name: v${{ steps.ver.outputs.version }}
           files: manifests/smoothnas-plugin-*.yaml
           generate_release_notes: true

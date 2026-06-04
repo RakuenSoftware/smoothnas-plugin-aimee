@@ -102,12 +102,25 @@ the host fails the install with `profile "aimee-stack" not in catalog`.
 The manifests track `:latest`. For reproducible installs, edit `artifact.image`
 to a release tag (e.g. `:0.2.1`) or add an `artifact.digest: sha256:...`.
 
-## Releasing
+## Releasing (automatic)
 
-Pushing a `v*` tag runs [`.github/workflows/release.yml`](.github/workflows/release.yml),
-which creates a GitHub release and attaches the three manifests as
-`smoothnas-plugin-aimee-*.yaml` assets — exactly what the SmoothNAS catalog
-fetches.
+Versioning is automatic. Every push to `main` (except doc-only changes) runs
+[`.github/workflows/release.yml`](.github/workflows/release.yml), which:
+
+1. computes the next semver **patch** from the highest existing `v*` tag,
+2. stamps that version into each manifest's `metadata.version`, and
+3. cuts a `v<version>` GitHub release with the three
+   `smoothnas-plugin-aimee-*.yaml` assets — exactly what the SmoothNAS catalog
+   fetches from the latest release.
+
+So merging a change to `main` ships a new version on its own; no manual tagging.
+To bump the **minor/major** instead of the patch, run the workflow manually
+(Actions → release → *Run workflow*) and pass an explicit `version` (e.g.
+`0.2.0`).
+
+The committed manifests keep a base `metadata.version`; the **released assets**
+are stamped with the actual release version at build time, so the version the
+appliance sees always matches the release tag.
 
 ---
 
