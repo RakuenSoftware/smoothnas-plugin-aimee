@@ -6,8 +6,8 @@ published as one catalog entry that ships three plugins:
 | Plugin | Image (GHCR) | What it is |
 | --- | --- | --- |
 | **aimee-server** | `ghcr.io/rakuensoftware/aimee-server` | The agent/memory broker. Serves the `/v1` HTTP API backed by a self-contained SQLite store (DB1). Runs standalone. |
-| **aimee-kb** | `ghcr.io/rakuensoftware/aimee-kb` | The knowledge base: shared, vector-backed memory (DB2 + pgvector) over `/v1`. Needs an **external** Postgres + embedder. |
-| **aimee-combined** | `ghcr.io/rakuensoftware/aimee-server-kb` | Both binaries co-located in one container — the full `/v1` surface with shared/vector memory. Needs an **external** Postgres + embedder. |
+| **aimee-kb** | `ghcr.io/rakuensoftware/aimee-kb` | The knowledge base: shared, vector-backed memory (DB2 + pgvector) over `/v1`. **Self-contained** — bundles its own pgvector Postgres + embedder. |
+| **aimee-combined** | `ghcr.io/rakuensoftware/aimee-server-kb` | Both binaries co-located in one container — the full `/v1` surface with shared/vector memory. **Self-contained** — bundles its own pgvector Postgres + embedder. |
 
 These are [SmoothNAS plugin manifests](https://github.com/JBailes/SmoothNAS)
 (`smoothnas.io/v1`, `kind: Plugin`). SmoothNAS runs each as a single managed LXC
@@ -26,34 +26,34 @@ files under [`manifests/`](manifests/).
 
 ## Which one do I want?
 
-- **Just the broker, nothing external to run** → **aimee-server** (standalone,
+- **Just the broker, nothing else to run** → **aimee-server** (standalone,
   SQLite only). Federate to a kb later by setting `AIMEE_KB_API_URL`.
-- **Shared/vector memory, and you already run (or will run) Postgres+embedder**
-  → **aimee-kb** (kb only) or **aimee-combined** (server + kb in one container).
+- **Shared/vector memory with zero external setup** → **aimee-kb** (kb only) or
+  **aimee-combined** (server + kb in one container). Both bundle their Postgres
+  and embedder.
 
-## External dependencies (aimee-kb / aimee-combined)
+## Storage & bundled services (aimee-kb / aimee-combined)
 
-SmoothNAS plugins are **single-container**. aimee-kb and aimee-combined do **not**
-bundle their datastores — they require:
+These are compose-style plugins (`services:`): aimee-kb and aimee-combined bring
+up their **own** pgvector Postgres and embedder as sibling services — there is no
+external database or embedder to stand up. The kb reaches its siblings over the
+plugin bridge via service-discovery tokens, so nothing needs configuring.
 
-1. **Postgres with pgvector** (DB2) — e.g. `pgvector/pgvector:pg16`.
-2. **An embedder service** — the aimee embedder image, serving `/health` + the
-   embedding API on `:8080`.
+Their volumes (the Postgres database, the embedder model cache, kb state) are
+**tier-bound**: at install you choose which storage tier holds them, keeping the
+data off the small OS/root device. The per-volume `slot` (HDD) is the home tier
+within that pool; smoothfs caches hot data on faster tiers automatically.
 
-Run those on your own infra (another host/container) reachable from the SmoothNAS
-box, then point the plugin at them via config:
-
-- `AIMEE_DB2_URL` — e.g. `postgresql://aimee:PASS@10.0.0.6:5432/aimee_shared`
-- `AIMEE_EMBEDDER_URL` — e.g. `http://10.0.0.6:8080`
-
-The manifest defaults (`postgres`, `embedder` hostnames) come from the upstream
-`compose.yaml` and only resolve inside that compose network — **override them**.
+Postgres runs as **uid 1000** (`container.user`) because SmoothNAS tiers present
+a uniform owner of uid 1000; the stock postgres image would otherwise drop to its
+own user and be unable to access its data dir. Honoring the container user
+requires the runtime from **SmoothNAS v0.1.20+**.
 
 `LLM_ENDPOINT` / `LLM_MODEL` are optional: set them to an OpenAI-compatible
 endpoint to enable the kb's candidate-synthesis and curator passes. Left blank,
 those passes stay disabled (they fail closed without an endpoint).
 
-aimee-server has no external dependencies in its default (standalone) shape.
+aimee-server is standalone (self-contained SQLite, no bundled services).
 
 ## Ports
 
