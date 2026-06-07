@@ -17,7 +17,7 @@
 #
 # Images:
 #   ghcr.io/rakuensoftware/aimee-kb         (kb)
-#   pgvector/pgvector:pg16                  (Postgres, public)
+#   pgvector/pgvector:pg17                  (Postgres, public)
 #   ghcr.io/rakuensoftware/aimee-embedder   (embedder — published from
 #                                            Dockerfile.embedder; see release CI)
 apiVersion: smoothnas.io/v1
@@ -37,7 +37,7 @@ services:
   - name: postgres
     artifact:
       type: oci-image
-      image: pgvector/pgvector:pg16
+      image: pgvector/pgvector:pg17
     container:
       restartPolicy: unless-stopped
       # SmoothNAS tiers (smoothfs) force a uniform owner of uid 1000 on their

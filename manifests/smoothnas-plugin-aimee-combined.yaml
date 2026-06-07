@@ -14,7 +14,7 @@
 #
 # Images:
 #   ghcr.io/rakuensoftware/aimee-server-kb   (combined server+kb)
-#   pgvector/pgvector:pg16                    (Postgres, public)
+#   pgvector/pgvector:pg17                    (Postgres, public)
 #   ghcr.io/rakuensoftware/aimee-embedder     (embedder)
 apiVersion: smoothnas.io/v1
 kind: Plugin
@@ -31,7 +31,7 @@ services:
   - name: postgres
     artifact:
       type: oci-image
-      image: pgvector/pgvector:pg16
+      image: pgvector/pgvector:pg17
     container:
       restartPolicy: unless-stopped
       # Run as uid 1000 to match the smoothfs tier's forced owner (the stock
