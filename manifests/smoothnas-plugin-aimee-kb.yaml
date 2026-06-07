@@ -6,6 +6,15 @@
 # infrastructure to stand up or configure. The kb reaches its siblings over the
 # plugin bridge via service-discovery tokens ({{service.<name>.host}}).
 #
+# Storage: all volumes are tier-bound, so the Postgres database, the embedder
+# model, and the kb state live on a storage tier of your choosing — NOT the
+# small OS/root device. Pick the target tier at install time (the per-volume
+# slot below is the home tier within that pool; smoothfs promotes hot data
+# upward automatically). Postgres runs as uid 1000 because SmoothNAS tiers
+# (smoothfs) present a uniform owner of uid 1000, and the stock postgres image
+# would otherwise drop to its own user and be unable to access its data dir.
+# (Honoring the container user requires the runtime from SmoothNAS v0.1.20+.)
+#
 # Images:
 #   ghcr.io/rakuensoftware/aimee-kb         (kb)
 #   pgvector/pgvector:pg16                  (Postgres, public)
@@ -31,13 +40,22 @@ services:
       image: pgvector/pgvector:pg16
     container:
       restartPolicy: unless-stopped
+      # SmoothNAS tiers (smoothfs) force a uniform owner of uid 1000 on their
+      # files. The stock postgres image runs PID 1 as root and drops to the
+      # postgres user (uid 999), which then can't access its uid-1000-owned
+      # data dir. Run it as uid 1000 so it owns its data. (Requires a runtime
+      # that honors the container user — SmoothNAS v0.1.20+.)
+      user: "1000:1000"
     env:
       POSTGRES_DB: aimee_shared
       POSTGRES_USER: aimee
       POSTGRES_PASSWORD: aimee
     volumes:
       - name: pgdata
-        mode: flat
+        # Tier-bound: the database lives on the assigned storage tier, not the
+        # root device. HDD is the home slot; smoothfs caches hot pages upward.
+        mode: tier-bound
+        slot: HDD
         bind: /var/lib/postgresql/data
     health:
       test: ["CMD-SHELL", "pg_isready -U aimee -d aimee_shared"]
@@ -55,7 +73,9 @@ services:
       restartPolicy: unless-stopped
     volumes:
       - name: models
-        mode: flat
+        # Tier-bound: the embedder model cache lives on the assigned tier.
+        mode: tier-bound
+        slot: HDD
         bind: /opt/models
     ports:
       - name: http
@@ -91,7 +111,9 @@ services:
     volumes:
       # kb state and baked config under AIMEE_HOME.
       - name: home
-        mode: flat
+        # Tier-bound: kb state/config lives on the assigned tier.
+        mode: tier-bound
+        slot: HDD
         bind: /var/lib/aimee
     ports:
       - name: api

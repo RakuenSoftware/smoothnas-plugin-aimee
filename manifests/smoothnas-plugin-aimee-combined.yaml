@@ -34,13 +34,18 @@ services:
       image: pgvector/pgvector:pg16
     container:
       restartPolicy: unless-stopped
+      # Run as uid 1000 to match the smoothfs tier's forced owner (the stock
+      # postgres image otherwise drops to its own user and can't access its
+      # uid-1000-owned data dir). Requires SmoothNAS v0.1.20+ runtime.
+      user: "1000:1000"
     env:
       POSTGRES_DB: aimee_shared
       POSTGRES_USER: aimee
       POSTGRES_PASSWORD: aimee
     volumes:
       - name: pgdata
-        mode: flat
+        mode: tier-bound
+        slot: HDD
         bind: /var/lib/postgresql/data
     health:
       test: ["CMD-SHELL", "pg_isready -U aimee -d aimee_shared"]
@@ -56,7 +61,8 @@ services:
       restartPolicy: unless-stopped
     volumes:
       - name: models
-        mode: flat
+        mode: tier-bound
+        slot: HDD
         bind: /opt/models
     ports:
       - name: http
@@ -91,10 +97,12 @@ services:
       AIMEE_KB_HTTP_BIND: "1"
     volumes:
       - name: home
-        mode: flat
+        mode: tier-bound
+        slot: HDD
         bind: /var/lib/aimee
       - name: workspaces
-        mode: flat
+        mode: tier-bound
+        slot: HDD
         bind: /var/lib/aimee-workspaces
     ports:
       # The server /v1 listener is the container's public contract.
