@@ -30,14 +30,20 @@ services:
       # reaches 0.0.0.0. No command override needed.
       restartPolicy: unless-stopped
     volumes:
-      # DB1 (aimee.db) and server state live under AIMEE_HOME.
+      # DB1 (aimee.db) and server state live under AIMEE_HOME. Tier-bound so the
+      # data sits on a storage tier of your choosing, not the small OS/root
+      # device; pick the tier at install (slot is the home tier within it,
+      # smoothfs promotes hot data upward). The server runs as uid 1000 to match
+      # SmoothNAS tiers' forced owner (requires the runtime from v0.1.20+).
       - name: home
-        mode: flat
+        mode: tier-bound
+        slot: HDD
         bind: /var/lib/aimee
       # Mirror tier (AIMEE_WORKSPACES_DIR): per-workspace bare mirrors +
       # reconstructed worktrees. Large, durable, separate backup lifecycle.
       - name: workspaces
-        mode: flat
+        mode: tier-bound
+        slot: HDD
         bind: /var/lib/aimee-workspaces
     ports:
       # Authenticated JSON API (bearer required on every request) — published on

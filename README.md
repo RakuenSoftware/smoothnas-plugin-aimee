@@ -32,28 +32,30 @@ files under [`manifests/`](manifests/).
   **aimee-combined** (server + kb in one container). Both bundle their Postgres
   and embedder.
 
-## Storage & bundled services (aimee-kb / aimee-combined)
+## Storage & bundled services
 
-These are compose-style plugins (`services:`): aimee-kb and aimee-combined bring
+aimee-kb and aimee-combined are compose-style plugins (`services:`): they bring
 up their **own** pgvector Postgres and embedder as sibling services — there is no
 external database or embedder to stand up. The kb reaches its siblings over the
 plugin bridge via service-discovery tokens, so nothing needs configuring.
 
-Their volumes (the Postgres database, the embedder model cache, kb state) are
-**tier-bound**: at install you choose which storage tier holds them, keeping the
-data off the small OS/root device. The per-volume `slot` (HDD) is the home tier
-within that pool; smoothfs caches hot data on faster tiers automatically.
+All three plugins use **tier-bound** volumes (Postgres database, embedder model
+cache, kb/server state, DB1, mirror workspaces): at install you choose which
+storage tier holds them, keeping the data off the small OS/root device. The
+per-volume `slot` (HDD) is the home tier within that pool; smoothfs caches hot
+data on faster tiers automatically.
 
-Postgres runs as **uid 1000** (`container.user`) because SmoothNAS tiers present
-a uniform owner of uid 1000; the stock postgres image would otherwise drop to its
-own user and be unable to access its data dir. Honoring the container user
-requires the runtime from **SmoothNAS v0.1.20+**.
+The containers run as **uid 1000** to match SmoothNAS tiers, which present a
+uniform owner of uid 1000 — the stock images would otherwise drop to their own
+user and be unable to access their data dirs. This requires the runtime from
+**SmoothNAS v0.1.20+** (which honours the container user).
 
 `LLM_ENDPOINT` / `LLM_MODEL` are optional: set them to an OpenAI-compatible
 endpoint to enable the kb's candidate-synthesis and curator passes. Left blank,
 those passes stay disabled (they fail closed without an endpoint).
 
-aimee-server is standalone (self-contained SQLite, no bundled services).
+aimee-server has no bundled services (self-contained SQLite DB1); it optionally
+federates to a kb via `AIMEE_KB_API_URL` (+ `AIMEE_KB_API_BEARER_TOKEN`).
 
 ## Ports
 
