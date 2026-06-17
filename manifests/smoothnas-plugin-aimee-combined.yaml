@@ -111,6 +111,13 @@ services:
         protocol: tcp
         expose: false
         hostExpose: true
+      # Browser webchat UI (HTTPS). First-class and on by default in the image;
+      # published so it is reachable from the host/LAN.
+      - name: webchat
+        port: 8443
+        protocol: tcp
+        expose: false
+        hostExpose: true
     config:
       - key: LLM_ENDPOINT
         type: string
@@ -124,3 +131,25 @@ services:
         label: LLM model (optional)
         default: ""
         description: Optional. Model name to request from the LLM endpoint.
+      - key: AIMEE_WEBCHAT_ENABLED
+        type: boolean
+        label: Browser webchat UI
+        default: true
+        description: >-
+          Browser UI on HTTPS :8443 (first-class, on by default). Turn off to
+          serve the /v1 API only.
+      - key: AIMEE_WEBCHAT_USER
+        type: string
+        label: Webchat login user
+        default: ""
+        description: >-
+          PAM login username for the browser UI. Set this together with a
+          password to enable sign-in; leave blank to serve the login page with
+          no account.
+      - key: AIMEE_WEBCHAT_PASSWORD
+        type: string
+        label: Webchat login password
+        default: ""
+        secret: true
+        description: >-
+          PAM login password for the browser UI (set alongside the user).
