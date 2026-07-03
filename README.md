@@ -1,13 +1,15 @@
 # smoothnas-plugin-aimee
 
 SmoothNAS plugin manifests for [aimee](https://github.com/RakuenSoftware/aimee) —
-published as one catalog entry that ships three plugins:
+published as one catalog entry that ships these plugins:
 
 | Plugin | Image (GHCR) | What it is |
 | --- | --- | --- |
 | **aimee-server** | `ghcr.io/rakuensoftware/aimee-server` | The agent/memory broker. Serves the `/v1` HTTP API backed by a self-contained SQLite store (DB1). Runs standalone. |
 | **aimee-kb** | `ghcr.io/rakuensoftware/aimee-kb` | The knowledge base: shared, vector-backed memory (DB2 + pgvector) over `/v1`. **Self-contained** — bundles its own pgvector Postgres + embedder. |
 | **aimee-combined** | `ghcr.io/rakuensoftware/aimee-server-kb` | Both binaries co-located in one container — the full `/v1` surface with shared/vector memory. **Self-contained** — bundles its own pgvector Postgres + embedder. |
+| **aimee-llm-gpu-small** | `ghcr.io/rakuensoftware/aimee-kb-gpu-small` | The unified Vulkan llama.cpp backend (embed + rerank + synth) from baked GGUFs, **small tier** (Gemma-4-12B dense). GPU via `/dev/dri`; fits a ~16GB+ card. Back the kb's embedder/LLM endpoint with it. |
+| **aimee-llm-gpu-mid** | `ghcr.io/rakuensoftware/aimee-kb-gpu-mid` | Same unified Vulkan backend, **mid tier** (Gemma-4-26B-A4B MoE, 4B active). ~14GB fits a 24GB card fully resident. |
 
 These are [SmoothNAS plugin manifests](https://github.com/JBailes/SmoothNAS)
 (`smoothnas.io/v1`, `kind: Plugin`). SmoothNAS runs each as a single managed LXC
@@ -17,8 +19,8 @@ container. The Docker images are built and published from the aimee repo
 ## Install
 
 In the SmoothNAS UI, add this catalog repo: **`RakuenSoftware/smoothnas-plugin-aimee`**.
-SmoothNAS reads the latest GitHub release and surfaces all three
-`smoothnas-plugin-*.yaml` assets. Install the one(s) you want and set the config
+SmoothNAS reads the latest GitHub release and surfaces every
+`smoothnas-plugin-*.yaml` asset. Install the one(s) you want and set the config
 fields described below.
 
 You can also sideload a single manifest by URL or local file — grab any of the
@@ -31,6 +33,12 @@ files under [`manifests/`](manifests/).
 - **Shared/vector memory with zero external setup** → **aimee-kb** (kb only) or
   **aimee-combined** (server + kb in one container). Both bundle their Postgres
   and embedder.
+- **A local GPU LLM for synthesis + higher-quality embeddings** →
+  **aimee-llm-gpu-small** (Gemma-4-12B dense, ~16GB+ card) or
+  **aimee-llm-gpu-mid** (Gemma-4-26B-A4B MoE, 24GB card). Runs the unified Vulkan
+  llama.cpp backend standalone; point the kb's `LLM_ENDPOINT` (and, for the richer
+  2560-dim embedder, `AIMEE_EMBEDDER_URL`) at `http://10.100.0.1:8742`. Install
+  one tier — both host-publish `:8742`, so they can't coexist on one host.
 
 ## Storage & bundled services
 
@@ -39,7 +47,7 @@ up their **own** pgvector Postgres and embedder as sibling services — there is
 external database or embedder to stand up. The kb reaches its siblings over the
 plugin bridge via service-discovery tokens, so nothing needs configuring.
 
-All three plugins use **tier-bound** volumes (Postgres database, embedder model
+The server/kb/combined plugins use **tier-bound** volumes (Postgres database, embedder model
 cache, kb/server state, DB1, mirror workspaces): at install you choose which
 storage tier holds them, keeping the data off the small OS/root device. The
 per-volume `slot` (HDD) is the home tier within that pool; smoothfs caches hot
@@ -111,8 +119,8 @@ Versioning is automatic. Every push to `main` (except doc-only changes) runs
 
 1. computes the next semver **patch** from the highest existing `v*` tag,
 2. stamps that version into each manifest's `metadata.version`, and
-3. cuts a `v<version>` GitHub release with the three
-   `smoothnas-plugin-aimee-*.yaml` assets — exactly what the SmoothNAS catalog
+3. cuts a `v<version>` GitHub release with every
+   `smoothnas-plugin-aimee-*.yaml` asset — exactly what the SmoothNAS catalog
    fetches from the latest release.
 
 So merging a change to `main` ships a new version on its own; no manual tagging.
