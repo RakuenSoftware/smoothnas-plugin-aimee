@@ -136,3 +136,7 @@ appliance sees always matches the release tag.
 
 These manifests reference the [aimee](https://github.com/RakuenSoftware/aimee)
 project and are distributed under the same terms.
+
+## License
+
+This plugin is licensed under the [AGPL-3.0](LICENSE).
